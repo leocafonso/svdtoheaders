@@ -52,25 +52,25 @@ def peripherals(doc):
     base_address = int(p['baseAddress'], 0)
 
     address_block = p.get('addressBlock', {})
-    size = int(address_block.get('size', "0"), 0)
+    #size = int(address_block.get('size', "0"), 0)
     #end_address = base_address
 
-    if '@derivedFrom' in p:
-      derived_from = p['@derivedFrom']
-      size = sizes[derived_from] # BASE was already printed. derive size.
+    # if '@derivedFrom' in p:
+    #   derived_from = p['@derivedFrom']
+    #   size = sizes[derived_from] # BASE was already printed. derive size.
 
-    end_address = base_address + size - 1
+    # end_address = base_address + size - 1
 
-    base_addresses[name] = base_address
-    sizes[name] = size
+    # base_addresses[name] = base_address
+    # sizes[name] = size
 
     symname = f"{prefix}{name.upper()}_BASE"
     define = f"#define {symname:<20} {hex(base_address)}"
 
     lname = cleanse(p.get('description', name))
 
-    cmt = f" /* {base_address:#x}-{end_address:#x}: {humanBytes(size)} {lname} */"
-
+    # cmt = f" /* {base_address:#x}-{end_address:#x}: {humanBytes(size)} {lname} */"
+    cmt = f" /* {base_address:#x} - {lname} */"
     defines.append(define + cmt)
 
 
@@ -78,6 +78,24 @@ def peripherals(doc):
   #defines.sort(key=lambda x: x[0])
   return defines
 
+def parse_dim_index(dim_index):
+    if '-' in dim_index:
+        # Handle the range case, e.g., "0-7"
+        start, end = map(int, dim_index.split('-'))
+        return list(range(start, end + 1))
+    elif ',' in dim_index:
+        # Handle the comma-separated case, e.g., "0,1" or "M4I,M4D,SYS,DMA"
+        # First, try to convert each to an integer. If that fails, treat them as strings.
+        try:
+            return list(map(int, dim_index.split(',')))
+        except ValueError:
+            return dim_index.split(',')
+    else:
+        # Handle single value case, or return an empty list
+        try:
+            return [int(dim_index)]
+        except ValueError:
+            return [dim_index] if dim_index else []
 
 def registers(doc):
   rv = []
@@ -104,16 +122,40 @@ def registers(doc):
         pdefines[reg_base] = hex(baseAddress)
 
         for register in registers:
-          r_name = register['name']
+          posfix = ''
+          if '[%s]' in register['name']:
+            posfix = '(p)'
+            r_name = register['name'].replace('[%s]', '')
+          elif '%s' in register['name']:
+            posfix = '(p)'
+            r_name = register['name'].replace('%s', '')
+          else:
+            r_name = register['name']            
           r_descr = cleanse(register.get('description', 'N/A'))
           r_base = int(register['addressOffset'], 0)
           regname = f"{prefix}{p_name}_{r_name}"
           offsetname = f"{regname}_OFFSET"
+          r_dim = int(register.get('dim', '0'),0)  # Default to 0 if 'dim' is not present
+          r_dim_increment = int(register.get('dimIncrement', '0'),0)  # Default to 0 if 'dimIncrement' is not present
 
-          rv.append(f'#define {offsetname:<{column}} 0x{r_base:04x}')
-          pdefines[offsetname] = r_base
-          rv.append(f'#define {regname:<{column}} ({reg_base} + {offsetname})')
-          pdefines[regname] = offsetname
+          # Parse the dimIndex
+          raw_dim_index = register.get('dimIndex', '')
+          r_dim_index = parse_dim_index(cleanse(raw_dim_index))
+
+          if r_dim > 0:
+            regsizename = f"{regname}_SIZE"
+            rv.append(f'#define {regsizename:<{column}} {r_dim}')
+            rv.append(f'#define {offsetname:<{column}} 0x{r_base:04x}')
+            #print(offsetname)
+            pdefines[offsetname] = r_base
+            regname = regname + posfix
+            rv.append(f'#define {regname:<{column}} ({reg_base} + {offsetname} + {posfix}*0x{r_dim_increment:04x})')
+            pdefines[regname] = offsetname
+          else:
+            rv.append(f'#define {offsetname:<{column}} 0x{r_base:04x}')
+            pdefines[offsetname] = r_base
+            rv.append(f'#define {regname:<{column}} ({reg_base} + {offsetname})')
+            pdefines[regname] = offsetname
 
           fields = register.get('fields', {}).get('field', [])
           if isinstance(fields, dict):
@@ -122,11 +164,15 @@ def registers(doc):
             for field in fields:
               f_name = field.get('name')
               f_descr = cleanse(field.get('description', 'N/A'))
+              bit_width = 0
               if 'bitOffset' in field and 'bitWidth' in field:
                 bit_offset = int(field.get('bitOffset', 0))
                 bit_width = int(field.get('bitWidth', 1))
+              if 'lsb' in field and 'msb' in field:
+                bit_offset = int(field.get('lsb', 0))
+                bit_width = int(field.get('msb', 1)) - bit_offset + 1
+              if bit_width > 0 and field['name'] != 'Reserved':
                 mask = (1 << bit_width) - 1
-
                 b_name = prefix +  p_name + '_' + r_name + '_' + f_name
                 rv.append(f'#define {b_name:<{column}} ({bit_width} << {bit_offset:>2})'
                           + f' /* {1<<bit_offset:02x}: {f_descr} */')
@@ -136,6 +182,7 @@ def registers(doc):
                   maskname = b_name + "_MASK"
                   rv.append(f'#define {maskname:<{column + 5}} (0x{mask:02x})')
                   pdefines[maskname] = None
+
           pperiphs[p_name] = pdefines
         pdefines = {}
     else:
