@@ -131,13 +131,20 @@ def peripherals(doc: Dict[str, Any], prefix: str) -> List[str]:
             raise SVDContentError("Missing mandatory 'baseAddress' element " +
                                   "in peripheral '" + name + "'.") from e
 
-        address_block = p.get('addressBlock', {})
-        size = int(address_block.get('size', "0"), 0)
+        address_blocks = p.get('addressBlock', {})
+        if isinstance(address_blocks, dict):
+            address_blocks = [address_blocks]
+        # A peripheral may declare several addressBlocks (e.g. disjoint
+        # register ranges); size is the extent covering all of them.
+        size = max(
+            (int(ab.get('offset', "0"), 0) + int(ab.get('size', "0"), 0)
+             for ab in address_blocks),
+            default=0)
 
         if '@derivedFrom' in p:
             derived_from = p['@derivedFrom']
             # BASE was already printed. derive size.
-            size = sizes[derived_from]
+            size = sizes.get(derived_from, 0)
 
         end_address = base_address + size - 1
         base_addresses[name] = base_address
@@ -184,6 +191,11 @@ def _process_fields(rv: List[str], prefix: str, p_name_clean: str,
                     "Missing mandatory 'name' element in a " +
                     "field within register '" + r_name + "'" +
                     " of peripheral '" + p_name_clean + "'.") from e
+            if f_name == 'Reserved':
+                # Reserved fields carry no useful symbol, and some vendor
+                # SVDs (e.g. Renesas RA) repeat the name within one
+                # register, which would otherwise emit duplicate #defines.
+                continue
             f_descr = cleanse(field.get('description', 'N/A'))
 
             bit_offset = None
@@ -245,15 +257,51 @@ def _process_fields(rv: List[str], prefix: str, p_name_clean: str,
                 for ev in enumerated_values:
                     try:
                         ev_name = ev['name']
-                        ev_value = ev['value']
                     except KeyError as e:  # noqa: F841
                         raise SVDContentError(
-                            "Missing mandatory 'name' or 'value' element in " +
+                            "Missing mandatory 'name' element in " +
                             "an enumeratedValue within field '" + f_name + "'"
                             "of register '" + r_name + "' of peripheral '" +
                             p_name_clean + "'.") from e
+                    ev_value = ev.get('value')
+                    if ev_value is None:
+                        if 'isDefault' in ev:
+                            # Catch-all "any other encoding" entry; there is
+                            # no single value to emit a #define for.
+                            continue
+                        raise SVDContentError(
+                            "Missing mandatory 'value' element in " +
+                            "an enumeratedValue within field '" + f_name + "'"
+                            "of register '" + r_name + "' of peripheral '" +
+                            p_name_clean + "'.")
+                    if ev_value.startswith('#'):
+                        # SVD binary literal, e.g. "#0100"; 'x'/'X' bits are
+                        # don't-cares, treated as 0 for a concrete value.
+                        bits = ev_value[1:].replace('x', '0').replace('X', '0')
+                        ev_value = hex(int(bits, 2))
                     ev_define_name = f"{b_name}_{ev_name}"
                     rv.append(f'#define {ev_define_name:<{column}} {ev_value}')
+
+
+def _dim_index_labels(dim_index: Optional[str], dim: int) -> List[str]:
+    """Resolve the per-instance name suffixes for a 'dim' register/cluster.
+
+    Uses the SVD 'dimIndex' element when present (either a comma-separated
+    list of labels, e.g. "M4I,M4D,SYS,DMA", or a "start-end" numeric range,
+    e.g. "0-7"); falls back to plain 0..dim-1 numbering otherwise, or if
+    the parsed label count doesn't match 'dim'.
+    """
+    if not dim_index:
+        return [str(i) for i in range(dim)]
+    dim_index = cleanse(str(dim_index))
+    if '-' in dim_index and ',' not in dim_index:
+        start, end = dim_index.split('-')
+        labels = [str(i) for i in range(int(start), int(end) + 1)]
+    else:
+        labels = dim_index.split(',')
+    if len(labels) != dim:
+        return [str(i) for i in range(dim)]
+    return labels
 
 
 def _process_register_block(
@@ -330,9 +378,10 @@ def _process_peripheral_registers_list(
             name_template = register['name']
             base_offset = int(register['addressOffset'], 0)
 
-            for i in range(dim):
-                r_name = name_template.replace('[%s]', str(i)).replace(
-                    '%s', str(i))
+            labels = _dim_index_labels(register.get('dimIndex'), dim)
+            for i, label in enumerate(labels):
+                r_name = name_template.replace('[%s]', label).replace(
+                    '%s', label)
                 r_base = base_offset + i * dim_increment
                 access = register.get('access')
                 fields = (register.get('fields') or {}).get('field', [])
@@ -374,10 +423,11 @@ def _process_cluster(
         name_template = cluster_data['name']
         base_offset = int(cluster_data['addressOffset'], 0)
 
-        for i in range(dim):
+        labels = _dim_index_labels(cluster_data.get('dimIndex'), dim)
+        for i, label in enumerate(labels):
             c_name = name_template.replace(
-                '[%s]', str(i)).replace(
-                '%s', str(i))
+                '[%s]', label).replace(
+                '%s', label)
             # This is the base offset for the current cluster instance
             c_base = base_offset + i * dim_increment
 

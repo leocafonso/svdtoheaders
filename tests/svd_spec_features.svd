@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<device schemaVersion="1.1" xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:noNamespaceSchemaLocation="CMSIS-SVD.xsd" >
+  <vendor>TestVendor</vendor>
+  <vendorID>TV</vendorID>
+  <name>TestDevice</name>
+  <series>TestSeries</series>
+  <version>1.0</version>
+  <description>Test device exercising CMSIS-SVD spec features that simple
+  vendor files don't exercise: multiple addressBlocks per peripheral,
+  non-numeric dimIndex labels, repeated Reserved field names, isDefault
+  enumeratedValues, and binary-literal enumeratedValue values.</description>
+  <cpu>
+    <name>CM4</name>
+    <revision>r0p1</revision>
+    <endian>little</endian>
+    <mpuPresent>false</mpuPresent>
+    <fpuPresent>true</fpuPresent>
+    <nvicPrioBits>4</nvicPrioBits>
+    <vendorSystickConfig>false</vendorSystickConfig>
+  </cpu>
+  <addressUnitBits>8</addressUnitBits>
+  <width>32</width>
+  <size>32</size>
+  <access>read-write</access>
+  <resetValue>0x00000000</resetValue>
+  <resetMask>0xFFFFFFFF</resetMask>
+
+  <peripherals>
+    <peripheral>
+      <name>MULTIBLOCK_PERIPH</name>
+      <description>A peripheral with multiple disjoint addressBlocks.</description>
+      <groupName>TestGroup</groupName>
+      <baseAddress>0x40003000</baseAddress>
+      <addressBlock>
+        <offset>0x0</offset>
+        <size>0x4</size>
+        <usage>registers</usage>
+      </addressBlock>
+      <addressBlock>
+        <offset>0x1000</offset>
+        <size>0x8</size>
+        <usage>registers</usage>
+      </addressBlock>
+      <registers>
+        <register>
+          <dim>4</dim>
+          <dimIncrement>0x4</dimIncrement>
+          <dimIndex>M4I,M4D,SYS,DMA</dimIndex>
+          <name>BUSMCNT%s</name>
+          <description>Master Bus Control Register %s</description>
+          <addressOffset>0x1000</addressOffset>
+          <size>16</size>
+          <access>read-write</access>
+          <fields>
+            <field>
+              <name>IERES</name>
+              <description>Ignore Error Responses</description>
+              <lsb>15</lsb>
+              <msb>15</msb>
+            </field>
+            <field>
+              <name>Reserved</name>
+              <description>Reserved bits, block 1.</description>
+              <lsb>8</lsb>
+              <msb>14</msb>
+            </field>
+            <field>
+              <name>Reserved</name>
+              <description>Reserved bits, block 2.</description>
+              <lsb>0</lsb>
+              <msb>7</msb>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>SCKDIVCR</name>
+          <description>System Clock Division Control Register.</description>
+          <addressOffset>0x0</addressOffset>
+          <size>32</size>
+          <access>read-write</access>
+          <fields>
+            <field>
+              <name>FCK</name>
+              <description>Flash IF Clock Select</description>
+              <lsb>28</lsb>
+              <msb>30</msb>
+              <enumeratedValues>
+                <enumeratedValue>
+                  <name>DIV1</name>
+                  <description>/1</description>
+                  <value>#000</value>
+                </enumeratedValue>
+                <enumeratedValue>
+                  <name>DIV2</name>
+                  <description>/2</description>
+                  <value>#001</value>
+                </enumeratedValue>
+                <enumeratedValue>
+                  <name>others</name>
+                  <description>Setting prohibited</description>
+                  <isDefault>true</isDefault>
+                </enumeratedValue>
+              </enumeratedValues>
+            </field>
+          </fields>
+        </register>
+      </registers>
+    </peripheral>
+  </peripherals>
+</device>

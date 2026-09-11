@@ -116,6 +116,54 @@ def test_cluster_generation():
             assert check_define('#define TEST_CLUSTER_PERIPH_TIMER1_DATA_OFFSET', '0x0014')
             assert check_define('#define TEST_CLUSTER_PERIPH_TIMER1_DATA', '(TEST_CLUSTER_PERIPH_BASE + TEST_CLUSTER_PERIPH_TIMER1_DATA_OFFSET)')
 
+def test_svd_spec_features_generation():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        reg_file = os.path.join(tmpdir, 'svd_spec_features_reg.h')
+        map_file = os.path.join(tmpdir, 'svd_spec_features_map.h')
+
+        args = ['-s', 'tests/svd_spec_features.svd', '-p', 'TEST_', '-r',
+                reg_file, '-m', map_file, '-o']
+        result = run_svdtoheaders(args)
+
+        assert result.returncode == 0, result.stderr
+
+        with open(map_file, 'r') as f:
+            map_lines = f.read().splitlines()
+        # A peripheral with disjoint addressBlocks must not crash, and its
+        # size should span the extent of all of them (0x1000 + 0x8 = 0x1008).
+        assert any(
+            '#define TEST_MULTIBLOCK_PERIPH_BASE' in line
+            and '0x40003000' in line and '0x40004007' in line
+            for line in map_lines)
+
+        with open(reg_file, 'r') as f:
+            content = f.read()
+            lines = content.splitlines()
+
+            def check_define(name, value):
+                return any(name in line and value in line for line in lines)
+
+            # dimIndex labels are used verbatim instead of 0..dim-1.
+            assert check_define(
+                '#define TEST_MULTIBLOCK_PERIPH_BUSMCNTM4I_OFFSET', '0x1000')
+            assert check_define(
+                '#define TEST_MULTIBLOCK_PERIPH_BUSMCNTDMA_OFFSET', '0x100c')
+            assert not any('BUSMCNT0' in line for line in lines)
+
+            # Repeated 'Reserved' fields within one register are skipped
+            # rather than emitting duplicate #defines.
+            reserved_defines = [
+                line for line in lines
+                if line.startswith('#define') and '_Reserved' in line
+            ]
+            assert reserved_defines == []
+
+            # An enumeratedValue with isDefault and no 'value' is skipped.
+            assert not any('_FCK_others' in line for line in lines)
+            # A binary SVD literal value ("#001") is converted to hex.
+            assert check_define(
+                '#define TEST_MULTIBLOCK_PERIPH_SCKDIVCR_FCK_DIV2', '0x1')
+
 def test_enum_generation():
     with tempfile.TemporaryDirectory() as tmpdir:
         reg_file = os.path.join(tmpdir, 'enum_reg.h')
